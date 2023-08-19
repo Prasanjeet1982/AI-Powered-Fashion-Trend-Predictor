@@ -1,0 +1,88 @@
+Let's break down the refactored code into different parts and explain each section:
+
+### 1. Folder Structure:
+
+- `app` (folder)
+  - `__init__.py` (empty file)
+  - `api.py` (contains the FastAPI app and API endpoints)
+  - `models.py` (contains model loading and prediction logic)
+
+### 2. `api.py`:
+
+- This file initializes the FastAPI app and defines the API endpoints.
+- It imports the `predict_trend` function from the `models.py` module to handle the prediction logic.
+
+```python
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from app.models import predict_trend
+from PIL import Image
+import io
+
+app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.post("/predict/")
+async def predict(file: UploadFile = File(...), caption: str = None):
+    try:
+        image = Image.open(io.BytesIO(await file.read())).convert("RGB")
+        predicted_trend = predict_trend(image, caption)
+        return JSONResponse(content={"predicted_trend": predicted_trend})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+```
+
+- The `FastAPI` instance is created using `FastAPI()`.
+- The CORS middleware is added to allow cross-origin requests.
+- The `/predict/` endpoint is defined using the `@app.post` decorator.
+- The `predict` function handles the image upload and caption input.
+- It uses the `predict_trend` function to get the predicted trend category based on the uploaded image and caption.
+- Any exceptions during the process are caught and returned as JSON responses.
+
+### 3. `models.py`:
+
+- This file contains the machine learning model loading and prediction logic.
+- It imports necessary libraries, loads the CLIP model, and defines the `predict_trend` function.
+
+```python
+import torch
+from transformers import CLIPProcessor, CLIPLMHeadModel
+import numpy as np
+from PIL import Image
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch16", device=device)
+model = CLIPLMHeadModel.from_pretrained("openai/clip-vit-base-patch16", device=device)
+
+def predict_trend(image, caption):
+    image_array = np.array(image.resize((224, 224))) / 255.0
+    caption = [caption] if caption else [""]
+    
+    inputs = processor(text=caption, images=[image_array], return_tensors="pt", padding=True, truncation=True)
+    outputs = model(**inputs)
+    image_features = outputs.logits_per_image
+    text_features = outputs.logits_per_text
+    
+    combined_features = np.concatenate([image_features.cpu().detach().numpy(), text_features.cpu().detach().numpy()], axis=1)
+    predictions = model.predict([combined_features])
+    
+    predicted_trend = np.argmax(predictions)
+    return predicted_trend
+```
+
+- The code initializes the CLIP model using the `CLIPProcessor` and `CLIPLMHeadModel` classes.
+- The `predict_trend` function takes an image and a caption as input.
+- The image is resized and normalized to match the model's input requirements.
+- The caption is processed, and features are extracted from the image and caption using the CLIP model.
+- The features are combined, and predictions are made using the CLIP model.
+- The predicted trend category is obtained by finding the index of the highest prediction value.
+
+Overall, this refactored code separates concerns and follows a modular structure, making it more organized and maintainable. The `api.py` file handles API-related tasks, while the `models.py` file handles machine learning model-related tasks. This way, you can easily modify or extend each part without affecting the other.
